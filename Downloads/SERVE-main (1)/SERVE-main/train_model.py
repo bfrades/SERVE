@@ -8,26 +8,39 @@ from tensorflow.keras.layers import LSTM, Dense
 # =========================
 # PATH
 # =========================
-DATA_PATH = os.path.join('MP_Data')
+DATA_PATH = 'MP_Data'
 
 # =========================
-# GET CLASSES (folder names)
+# GET ALL FOLDERS
 # =========================
-actions = np.array(sorted(os.listdir(DATA_PATH)))
-print("Detected classes:", actions)
+all_actions = sorted(os.listdir(DATA_PATH))
 
+# Keep only folders that actually contain data
+actions = []
+
+for action in all_actions:
+    action_path = os.path.join(DATA_PATH, action)
+
+    if os.path.isdir(action_path):
+        # check if it has sequence folders
+        if len(os.listdir(action_path)) > 0:
+            actions.append(action)
+
+actions = np.array(actions)
+
+print("Filtered classes:", actions)
+
+# label mapping
 label_map = {label: num for num, label in enumerate(actions)}
 
 # =========================
 # LOAD DATA
 # =========================
-sequences, labels = [], []
+sequences = []
+labels = []
 
 for action in actions:
     action_path = os.path.join(DATA_PATH, action)
-
-    if not os.path.isdir(action_path):
-        continue
 
     for sequence in os.listdir(action_path):
         sequence_path = os.path.join(action_path, sequence)
@@ -37,14 +50,8 @@ for action in actions:
 
         window = []
 
-        # =========================
-        # SAFE FRAME LOADING (FIXED)
-        # =========================
-        frame_files = [
-            f for f in os.listdir(sequence_path)
-            if f.endswith('.npy')
-        ]
-
+        # get npy files safely
+        frame_files = [f for f in os.listdir(sequence_path) if f.endswith('.npy')]
         frame_files = sorted(frame_files)
 
         for frame_file in frame_files:
@@ -56,26 +63,31 @@ for action in actions:
             except:
                 continue
 
-        # Only keep valid sequences
-        if len(window) > 0:
+        # IMPORTANT: only accept good sequences
+        if len(window) >= 10:   # prevents your 2-frame problem
             sequences.append(window)
             labels.append(label_map[action])
 
 # =========================
-# FIX RAGGED SEQUENCES
-# (make all same length)
+# CHECK IF DATA EXISTS
+# =========================
+if len(sequences) == 0:
+    raise Exception("No valid sequences found. Check MP_Data structure.")
+
+# =========================
+# FIX SEQUENCE LENGTH
 # =========================
 min_len = min(len(seq) for seq in sequences)
 sequences = [seq[:min_len] for seq in sequences]
 
 X = np.array(sequences)
-y = to_categorical(labels).astype(int)
+y = to_categorical(labels, num_classes=len(actions))
 
 print("X shape:", X.shape)
 print("y shape:", y.shape)
 
 # =========================
-# TRAIN / TEST SPLIT
+# TRAIN TEST SPLIT
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.05, random_state=42
@@ -85,13 +97,18 @@ X_train, X_test, y_train, y_test = train_test_split(
 # MODEL
 # =========================
 model = Sequential()
-model.add(LSTM(64, return_sequences=True, activation='relu', input_shape=(X.shape[1], X.shape[2])))
+model.add(LSTM(64, return_sequences=True, activation='relu',
+               input_shape=(X.shape[1], X.shape[2])))
 model.add(LSTM(128, return_sequences=False, activation='relu'))
 model.add(Dense(64, activation='relu'))
 model.add(Dense(32, activation='relu'))
-model.add(Dense(actions.shape[0], activation='softmax'))
+model.add(Dense(len(actions), activation='softmax'))
 
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
 
 # =========================
 # TRAIN
